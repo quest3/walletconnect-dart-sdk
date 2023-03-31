@@ -416,6 +416,9 @@ class WalletConnect {
     );
     await _sendResponse(request);
 
+    // Avoid starting `_handleSessionDisconnect` before completing `_sendRequest`, which will cause the dapp to not be disconnected from the wallet, https://github.com/RootSoft/walletconnect-dart-sdk/issues/84
+    await Future.delayed(const Duration(milliseconds: 500));
+
     await _handleSessionDisconnect(errorMessage: message, forceClose: true);
   }
 
