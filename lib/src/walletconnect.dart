@@ -180,14 +180,18 @@ class WalletConnect {
       onOpen: (reconnectAttempt) {
         try {
           completer.complete();
-        } catch (e) {}
+        } catch (e) {
+          _logger.log('reconnect onOpen error:$e');
+        }
       },
       onClose: () {
         try {
           completer.completeError(
             WalletConnectException('reconnect failed'),
           );
-        } catch (e) {}
+        } catch (e) {
+          _logger.log('reconnect onClose error:$e');
+        }
       },
     );
     return completer.future;
@@ -226,18 +230,18 @@ class WalletConnect {
     final uri = session.toUri();
     onDisplayUri?.call(uri);
     _eventBus.fire(Event<String>('display_uri', uri));
-    _logger.log("display ui");
+    _logger.log('display ui uri:$uri');
     // Send the request
 
     try {
       final response =
           await _sendRequest(request, topic: session.handshakeTopic);
-      _logger.log("response= $response");
+      _logger.log('response= $response');
       // Notify listeners
       await _handleSessionResponse(response);
       return WCSessionRequestResponse.fromJson(response).status;
     } catch (e) {
-      await _handleSessionDisconnect(errorMessage: "$e");
+      await _handleSessionDisconnect(errorMessage: '$e');
       rethrow;
     }
   }
@@ -473,7 +477,7 @@ class WalletConnect {
         "_handleIncomingMessages activeTopics=\n${activeTopics.join("\n")}\ntopic=\n${message.topic}");
     if (!activeTopics.contains(message.topic)) {
       _logger.log(
-          "_handleIncomingMessages topic \"${message.topic}\" is not in active topic list");
+          '_handleIncomingMessages topic \"${message.topic}\" is not in active topic list');
       return;
     }
 
@@ -494,13 +498,13 @@ class WalletConnect {
       );
     } on WalletConnectException catch (e) {
       //invalid hmac error, often occurs on switching chains. ignore it
-      _logger.log("_handleIncomingMessages error=$e");
+      _logger.log('_handleIncomingMessages error=$e');
       return;
     }
 
     // Decode the data
     final data = json.decode(utf8.decode(payload));
-    _logger.log("_handleIncomingMessages data=$data");
+    _logger.log('_handleIncomingMessages data=$data');
     // Check if the incoming message is a request
     if (_isJsonRpcRequest(data)) {
       final request = JsonRpcRequest.fromJson(data);
@@ -522,7 +526,7 @@ class WalletConnect {
     if (key == null) {
       return;
     }
-    _logger.log("_sendRequest request.params= ${request.params}");
+    _logger.log('_sendRequest request.params= ${request.params}');
 
     final data = json.encode(request.toJson());
     final payload = await cipherBox.encrypt(
@@ -536,17 +540,17 @@ class WalletConnect {
     var completer = Completer.sync();
 
     _pendingRequests[request.id] = _Request(method, completer, Chain.current());
-    _logger.log("_sendRequest _pendingRequests(${_pendingRequests.length}):");
+    _logger.log('_sendRequest _pendingRequests(${_pendingRequests.length}):');
     for (var key in _pendingRequests.keys) {
-      _logger.log("_sendRequest $key");
+      _logger.log('_sendRequest $key');
     }
     // Send the request
-    bool result = _transport.send(
+    var result = _transport.send(
       payload: payload.toJson(),
       topic: topic ?? session.peerId,
       silent: silent,
     );
-    _logger.log("_sendRequest result= $result");
+    _logger.log('_sendRequest result= $result');
     return completer.future;
   }
 
@@ -599,7 +603,7 @@ class WalletConnect {
   /// resolved.
   void _handleSingleResponse(response) {
     if (!_isResponseValid(response)) {
-      _logger.log("invalid response: ${response}");
+      _logger.log('invalid response: $response');
       return;
     }
     var id = response['id'];
