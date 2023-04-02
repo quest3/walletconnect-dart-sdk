@@ -10,12 +10,12 @@ WCSessionUpdateResponse _$WCSessionUpdateResponseFromJson(
         Map<String, dynamic> json) =>
     WCSessionUpdateResponse(
       approved: json['approved'] as bool? ?? false,
-      chainId: json['chainId'] as int? ?? 0,
+      chainId: const IntConverter().fromJson(json['chainId']),
       accounts: (json['accounts'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
           [],
-      networkId: json['networkId'] as int? ?? 0,
+      networkId: const IntConverter().fromJson(json['networkId']),
       rpcUrl: json['rpcUrl'] as String? ?? '',
     );
 

@@ -81,7 +81,9 @@ class WalletConnectSession {
   /// Approve the session.
   void approve(Map<String, dynamic> params) {
     connected = true;
-    chainId = params['chainId'] ?? chainId;
+    chainId = params.containsKey('chainId')
+        ? int.tryParse("${params['chainId'] ?? chainId}") ?? chainId
+        : chainId;
     accounts = params['accounts']?.cast<String>() ?? accounts;
     peerId = params['peerId'] ?? peerId;
     peerMeta = params.containsKey('peerMeta')

@@ -2,10 +2,13 @@ import 'package:json_annotation/json_annotation.dart';
 import 'package:walletconnect_dart/src/session/peer_meta.dart';
 import 'package:walletconnect_dart/src/session/session_status.dart';
 
+import 'converters.dart';
+
 part 'wc_session_request_response.g.dart';
 
 /// A response containing session information.
 @JsonSerializable()
+@NullableIntConverter()
 class WCSessionRequestResponse {
   @JsonKey(name: 'approved', defaultValue: false)
   final bool approved;

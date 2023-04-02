@@ -1,8 +1,11 @@
 import 'package:json_annotation/json_annotation.dart';
 
+import 'converters.dart';
+
 part 'wc_session_update_response.g.dart';
 
 @JsonSerializable()
+@IntConverter()
 class WCSessionUpdateResponse {
   @JsonKey(name: 'approved', defaultValue: false)
   final bool approved;
