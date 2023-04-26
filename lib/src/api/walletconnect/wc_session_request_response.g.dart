@@ -25,8 +25,8 @@ Map<String, dynamic> _$WCSessionRequestResponseToJson(
         WCSessionRequestResponse instance) =>
     <String, dynamic>{
       'approved': instance.approved,
-      'chainId': instance.chainId,
+      'chainId': const NullableIntConverter().toJson(instance.chainId),
       'accounts': instance.accounts,
       'peerId': instance.peerId,
-      'peerMeta': instance.peerMeta,
+      'peerMeta': instance.peerMeta?.toJson(),
     };

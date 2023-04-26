@@ -39,6 +39,9 @@ typedef OnDisplayUriCallback = void Function(String uri);
 /// A user can interact securely with any Dapp from their mobile phone,
 /// making WalletConnect wallets a safer choice compared to desktop or
 /// browser extension wallets.
+
+final Logger _logger = Logger((WalletConnect).toString());
+
 class WalletConnect {
   /// The wallet connect protocol
   static const protocol = 'wc';
@@ -66,43 +69,38 @@ class WalletConnect {
 
   /// Eventbus used for internal events.
   final EventBus _eventBus;
-  final Logger _logger = Logger((WalletConnect).toString());
 
-  WalletConnect._internal(
-      {required this.session,
-      required this.sessionStorage,
-      required this.signingMethods,
-      required this.cipherBox,
-      required SocketTransport transport,
-      bool debug = false})
-      : _transport = transport,
+  WalletConnect._internal({
+    required this.session,
+    required this.sessionStorage,
+    required this.signingMethods,
+    required this.cipherBox,
+    required SocketTransport transport,
+  })  : _transport = transport,
         _eventBus = EventBus() {
-    Logger.enabled = debug;
-    // Init transport event handling
-    _initTransport();
-
     // Subscribe to internal events
     _subscribeToInternalEvents();
 
-    if (session.handshakeTopic.isNotEmpty) {
-      transport.subscribe(topic: session.handshakeTopic);
-    }
+    // Init transport event handling
+    _initTransport();
   }
 
   /// WalletConnect is an open source protocol for connecting decentralised
   /// applications to mobile wallets with QR code scanning or deep linking.
   ///
   /// You should provide a bridge, uri or session object.
-  factory WalletConnect(
-      {String bridge = '',
-      String uri = '',
-      WalletConnectSession? session,
-      SessionStorage? sessionStorage,
-      CipherBox? cipher,
-      SocketTransport? transport,
-      String? clientId,
-      PeerMeta? clientMeta,
-      bool debug = false}) {
+  factory WalletConnect({
+    String bridge = '',
+    String uri = '',
+    WalletConnectSession? session,
+    SessionStorage? sessionStorage,
+    CipherBox? cipher,
+    SocketTransport? transport,
+    String? clientId,
+    PeerMeta? clientMeta,
+    bool? debug,
+  }) {
+    Logger.enabled = debug;
     if (bridge.isEmpty && uri.isEmpty && session == null) {
       throw WalletConnectException(
         'Missing one of the required parameters: bridge / uri / session',
@@ -140,12 +138,12 @@ class WalletConnect {
         );
 
     return WalletConnect._internal(
-        session: session,
-        sessionStorage: sessionStorage,
-        cipherBox: cipher,
-        signingMethods: [...ethSigningMethods],
-        transport: transport,
-        debug: debug);
+      session: session,
+      sessionStorage: sessionStorage,
+      cipherBox: cipher,
+      signingMethods: [...ethSigningMethods],
+      transport: transport,
+    );
   }
 
   /// Registers event subscriptions.
@@ -159,8 +157,11 @@ class WalletConnect {
   }
 
   /// Creates a new session calling [createSession] if it doesnt exists, or returns the instantiated one.
-  Future<SessionStatus> connect(
-      {int? chainId, OnDisplayUriCallback? onDisplayUri}) async {
+  Future<SessionStatus> connect({
+    int? chainId,
+    OnDisplayUriCallback? onDisplayUri,
+  }) async {
+    _logger.log('connect');
     if (connected) {
       onDisplayUri?.call(session.toUri());
       return SessionStatus(
@@ -174,23 +175,27 @@ class WalletConnect {
 
   /// Reconnects to the web socket server.
   Future<void> reconnect() async {
+    _logger.log('reconnect');
     var completer = Completer<void>();
     await _transport.close(forceClose: true);
     _transport.open(
       onOpen: (reconnectAttempt) {
         try {
-          completer.complete();
+          _subscribeToHandshakeTopic();
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
         } catch (e) {
-          _logger.log('reconnect onOpen error:$e');
+          _logger.warning('reconnect onOpen error:$e');
         }
       },
       onClose: () {
         try {
-          completer.completeError(
-            WalletConnectException('reconnect failed'),
-          );
+          if (!completer.isCompleted) {
+            completer.completeError(WalletConnectException('reconnect failed'));
+          }
         } catch (e) {
-          _logger.log('reconnect onClose error:$e');
+          _logger.warning('reconnect onClose error:$e');
         }
       },
     );
@@ -207,41 +212,44 @@ class WalletConnect {
     if (connected) {
       throw WalletConnectException('Session currently connected');
     }
-
-    // Generate encryption key
-    session.key = await cipherBox.generateKey();
-
-    final request = JsonRpcRequest(
-      id: payloadId,
-      method: 'wc_sessionRequest',
-      params: [
-        {
-          'peerId': session.clientId,
-          'peerMeta': session.clientMeta,
-          'chainId': chainId,
-        }
-      ],
-    );
-
-    session.handshakeId = request.id;
-    session.handshakeTopic = const Uuid().v4();
-
-    // Display the URI
-    final uri = session.toUri();
-    onDisplayUri?.call(uri);
-    _eventBus.fire(Event<String>('display_uri', uri));
-    _logger.log('display ui uri:$uri');
-    // Send the request
-
+    _logger.log('createSession');
     try {
+      // Generate encryption key
+      session.key = await cipherBox.generateKey();
+
+      final request = JsonRpcRequest(
+        id: payloadId,
+        method: 'wc_sessionRequest',
+        params: [
+          {
+            'peerId': session.clientId,
+            'peerMeta': session.clientMeta,
+            'chainId': chainId,
+          }
+        ],
+      );
+
+      session.handshakeId = request.id;
+      session.handshakeTopic = const Uuid().v4();
+
+      // Display the URI
+      final uri = session.toUri();
+      onDisplayUri?.call(uri);
+      _eventBus.fire(Event<String>('display_uri', uri));
+      _logger.log('display ui uri:$uri');
+
+      // Send the request
       final response =
           await _sendRequest(request, topic: session.handshakeTopic);
-      _logger.log('response= $response');
+      _logger.log('createSession response:$response');
+
       // Notify listeners
-      await _handleSessionResponse(response);
-      return WCSessionRequestResponse.fromJson(response).status;
+      await _handleSessionResponse(response ?? {});
+      return WCSessionRequestResponse.fromJson(response ?? {}).status;
     } catch (e) {
-      await _handleSessionDisconnect(errorMessage: '$e');
+      _logger.warning('createSession error:$e');
+      // todo
+      // await _handleSessionDisconnect(errorMessage: '$e');
       rethrow;
     }
   }
@@ -281,11 +289,10 @@ class WalletConnect {
     // Notify listeners
     _eventBus.fire(Event<SessionStatus>(
       'connect',
-      SessionStatus(
-        chainId: chainId,
-        accounts: accounts,
-      ),
+      SessionStatus(chainId: chainId, accounts: accounts),
     ));
+
+    return SessionStatus(chainId: chainId, accounts: accounts);
   }
 
   /// Rejects the session requested by the peer (dApp), responding with reason message.
@@ -307,6 +314,8 @@ class WalletConnect {
 
     await _sendResponse(response);
     session.connected = false;
+    // Store session
+    await sessionStorage?.store(session);
 
     // Notify listeners
     _eventBus.fire(Event<String>('disconnect', message));
@@ -340,8 +349,12 @@ class WalletConnect {
     );
     // Send the request
     final response = await _sendRequest(request);
+    _logger.log('updateSession response:$response');
+
     // Notify listeners
-    await _handleSessionResponse(response);
+    await _handleSessionResponse(response ?? {});
+
+    return WCSessionRequestResponse.fromJson(response ?? {}).status;
   }
 
   /// Approves a pending request responding with a hex encoded string
@@ -355,7 +368,7 @@ class WalletConnect {
       result: result,
     );
 
-    return _sendResponse(response);
+    return await _sendResponse(response);
   }
 
   /// Rejects a pending request specifing the error
@@ -369,7 +382,7 @@ class WalletConnect {
       error: {'error': errorMessage},
     );
 
-    return _sendResponse(response);
+    return await _sendResponse(response);
   }
 
   /// Send a custom request.
@@ -386,7 +399,10 @@ class WalletConnect {
       params: params,
     );
 
-    return _sendRequest(request);
+    final response = await _sendRequest(request);
+    _logger.log('sendCustomRequest response:$response');
+
+    return response;
   }
 
   /// Send a custom response.
@@ -401,15 +417,28 @@ class WalletConnect {
       error: error,
     );
 
-    return _sendResponse(response);
+    return await _sendResponse(response);
   }
 
   /// Kill the current session.
   /// https://docs.walletconnect.com/client-api#kill-session-disconnect
   Future killSession({String? sessionError}) async {
-    final message = sessionError ?? 'Session disconnected';
+    final request = JsonRpcRequest(
+      id: payloadId,
+      method: 'wc_sessionUpdate',
+      params: [
+        {
+          'approved': false,
+          'chainId': null,
+          'networkId': null,
+          'accounts': null,
+        }
+      ],
+    );
+    unawaited(_sendRequest(request));
+    await Future.delayed(const Duration(milliseconds: 100));
 
-    final request = JsonRpcResponse(
+    final response = JsonRpcResponse(
       id: session.handshakeId,
       result: {
         'approved': false,
@@ -418,11 +447,20 @@ class WalletConnect {
         'accounts': null,
       },
     );
-    await _sendResponse(request);
+    await _sendResponse(response)
+        .timeout(
+      const Duration(milliseconds: 100),
+      onTimeout: () => null,
+    )
+        .catchError((e) {
+      _logger.warning('killSession error:$e');
+    });
 
-    // Avoid starting `_handleSessionDisconnect` before completing `_sendRequest`, which will cause the dapp to not be disconnected from the wallet, https://github.com/RootSoft/walletconnect-dart-sdk/issues/84
-    await Future.delayed(const Duration(milliseconds: 500));
-
+    // Avoid starting `_handleSessionDisconnect` before completing `_sendRequest`,
+    // which will cause the dapp to not be disconnected from the wallet,
+    // https://github.com/RootSoft/walletconnect-dart-sdk/issues/84
+    await Future.delayed(const Duration(milliseconds: 150));
+    final message = sessionError ?? 'Session disconnected';
     await _handleSessionDisconnect(errorMessage: message, forceClose: true);
   }
 
@@ -474,10 +512,13 @@ class WalletConnect {
   void _handleIncomingMessages(WebSocketMessage message) async {
     final activeTopics = [session.clientId, session.handshakeTopic];
     _logger.log(
-        "_handleIncomingMessages activeTopics=\n${activeTopics.join("\n")}\ntopic=\n${message.topic}");
+      "IncomingMessages activeTopics:${activeTopics.join(", ")}"
+      '\nIncomingMessages message-topic:${message.topic}',
+    );
     if (!activeTopics.contains(message.topic)) {
       _logger.log(
-          '_handleIncomingMessages topic \"${message.topic}\" is not in active topic list');
+        'IncomingMessages \"${message.topic}\" is not in active topic list',
+      );
       return;
     }
 
@@ -487,33 +528,41 @@ class WalletConnect {
     }
 
     // Decrypt the payload
-    final encryptedPayload = EncryptedPayload.fromJson(
-      json.decode(message.payload),
-    );
     Uint8List payload;
     try {
+      final encryptedPayload = EncryptedPayload.fromJson(
+        json.decode(message.payload),
+      );
       payload = await cipherBox.decrypt(
         payload: encryptedPayload,
         key: key,
       );
     } on WalletConnectException catch (e) {
       //invalid hmac error, often occurs on switching chains. ignore it
-      _logger.log('_handleIncomingMessages error=$e');
+      _logger.warning('IncomingMessages decrypt error:$e');
       return;
     }
 
-    // Decode the data
-    final data = json.decode(utf8.decode(payload));
-    _logger.log('_handleIncomingMessages data=$data');
-    // Check if the incoming message is a request
-    if (_isJsonRpcRequest(data)) {
-      final request = JsonRpcRequest.fromJson(data);
-      _eventBus.fire(Event(request.method, request));
-      return;
-    }
+    try {
+      // Decode the data
+      final data = json.decode(utf8.decode(payload));
+      _logger.log('IncomingMessages data:$data');
+      // Check if the incoming message is a request
+      if (_isJsonRpcRequest(data)) {
+        final request = JsonRpcRequest.fromJson(data);
+        _eventBus.fire(Event(request.method, request));
+        if (request.method.startsWith('eth_') ||
+            request.method.endsWith('_sign')) {
+          _eventBus.fire(Event('call_request', request));
+        }
+        return;
+      }
 
-    // Handle the response
-    _handleSingleResponse(data);
+      // Handle the response
+      _handleSingleResponse(data);
+    } catch (e) {
+      _logger.warning('IncomingMessages decode error:$e');
+    }
   }
 
   /// Sends a JSON-RPC-2 compliant request to invoke the given [method].
@@ -526,7 +575,7 @@ class WalletConnect {
     if (key == null) {
       return;
     }
-    _logger.log('_sendRequest request.params= ${request.params}');
+    _logger.log('sendRequest request.params:${request.params}');
 
     final data = json.encode(request.toJson());
     final payload = await cipherBox.encrypt(
@@ -540,17 +589,17 @@ class WalletConnect {
     var completer = Completer.sync();
 
     _pendingRequests[request.id] = _Request(method, completer, Chain.current());
-    _logger.log('_sendRequest _pendingRequests(${_pendingRequests.length}):');
-    for (var key in _pendingRequests.keys) {
-      _logger.log('_sendRequest $key');
-    }
+    _logger.log(
+      'sendRequest pending:${_pendingRequests.length} current:${request.id}',
+    );
+
     // Send the request
     var result = _transport.send(
       payload: payload.toJson(),
       topic: topic ?? session.peerId,
       silent: silent,
     );
-    _logger.log('_sendRequest result= $result');
+    _logger.log('sendRequest result:$result');
     return completer.future;
   }
 
@@ -578,14 +627,27 @@ class WalletConnect {
     _transport.on('message', _handleIncomingMessages);
 
     // Open a new connection
-    _transport.open();
+    _transport.open(onOpen: (_) {
+      // wait socket open
+      _subscribeToHandshakeTopic();
+    });
+
+    /// wait open
+    // _subscribeToHandshakeTopic();
+  }
+
+  /// subscribe session handshakeTopic
+  void _subscribeToHandshakeTopic() {
+    if (session.handshakeTopic.isNotEmpty) {
+      _transport.subscribe(topic: session.handshakeTopic);
+    }
   }
 
   /// Handles incoming JSON RPC requests that do not have a mapped id.
   void _subscribeToInternalEvents() {
     // Wallet received a session request.
     on<JsonRpcRequest>('wc_sessionRequest', (payload) {
-      final request = WCSessionRequest.fromJson(payload.params?[0]);
+      final request = WCSessionRequest.fromJson(payload.params?[0] ?? {});
       session.handshakeId = payload.id;
       session.peerId = request.peerId ?? '';
       session.peerMeta = request.peerMeta ?? const PeerMeta();
@@ -602,23 +664,28 @@ class WalletConnect {
   /// Handles a decoded response from the server after batches have been
   /// resolved.
   void _handleSingleResponse(response) {
-    if (!_isResponseValid(response)) {
-      _logger.log('invalid response: $response');
-      return;
-    }
-    var id = response['id'];
-    id = (id is String) ? int.parse(id) : id;
-    var request = _pendingRequests.remove(id)!;
-    if (response.containsKey('result')) {
-      request.completer.complete(response['result']);
-    } else {
-      request.completer.completeError(
+    try {
+      if (!_isResponseValid(response)) {
+        _logger.log('invalid response: $response');
+        return;
+      }
+      var id = response['id'];
+      id = (id is String) ? int.parse(id) : id;
+      var request = _pendingRequests.remove(id)!;
+      if (response.containsKey('result')) {
+        request.completer.complete(response['result']);
+      } else {
+        request.completer.completeError(
           WalletConnectException(
             response['error']['message'],
             code: response['error']['code'],
             data: response['error']['data'],
           ),
-          request.chain);
+          request.chain,
+        );
+      }
+    } catch (e) {
+      _logger.warning('SingleResponse error:$e');
     }
   }
 
@@ -626,8 +693,8 @@ class WalletConnect {
   bool _isJsonRpcRequest(response) {
     if (response is! Map) return false;
     if (response['jsonrpc'] != '2.0') return false;
-    // var id = response['id'];
-    // id = (id is String) ? int.parse(id) : id;
+    var id = response['id'];
+    id = (id is String) ? int.parse(id) : id;
     return response.containsKey('method');
   }
 
@@ -649,7 +716,9 @@ class WalletConnect {
   }
 
   Future _handleSessionResponse(Map<String, dynamic> params) async {
-    final approved = params['approved'] ?? false;
+    final originalApproved =
+        params.containsKey('approved') ? params['approved'] : null;
+    final approved = originalApproved ?? false;
     final connected = this.connected;
     if (approved && !connected) {
       // New connection
@@ -671,7 +740,7 @@ class WalletConnect {
       // Notify the listeners
       final data = WCSessionUpdateResponse.fromJson(params);
       _eventBus.fire(Event<WCSessionUpdateResponse>('session_update', data));
-    } else {
+    } else if (originalApproved != null && !approved) {
       await _handleSessionDisconnect();
     }
   }

@@ -8,6 +8,8 @@ typedef OnSocketOpen = void Function(bool reconnectAttempt);
 typedef OnSocketClose = void Function();
 typedef OnMessage = void Function(dynamic data);
 
+final Logger _logger = Logger((ReconnectingWebSocket).toString());
+
 class ReconnectingWebSocket {
   /// The URL as resolved by the constructor.
   /// This is always an absolute URL. Read only.
@@ -26,8 +28,6 @@ class ReconnectingWebSocket {
   /// The maximum number of reconnection attempts to make. Unlimited if null.
   final int? maxReconnectAttempts;
 
-  final Logger _logger = Logger((ReconnectingWebSocket).toString());
-
   /// The number of attempted reconnects since starting, or the last successful
   /// connection. Read only.
   int _reconnectAttempts = 0;
@@ -38,8 +38,8 @@ class ReconnectingWebSocket {
   /// Whether the app is reconnecting.
   bool _reconnecting = false;
 
-  /// Whether the app should try to reconnect
-  bool _shouldReconnect = true;
+  /// Whether the app should close try to reconnect
+  bool _shouldForceClose = false;
 
   WebSocketChannel? _channel;
 
@@ -64,12 +64,12 @@ class ReconnectingWebSocket {
     this.onMessage,
   });
 
-  void open(bool reconnectAttempt) {
+  Future<bool> open(bool reconnectAttempt) async {
     final maxReconnectAttempts = this.maxReconnectAttempts;
     if (reconnectAttempt) {
       if (maxReconnectAttempts != null &&
           _reconnectAttempts > maxReconnectAttempts) {
-        return;
+        return false;
       }
     } else {
       _reconnectAttempts = 0;
@@ -87,20 +87,18 @@ class ReconnectingWebSocket {
       // The following SocketException was thrown:
       // Failed host lookup: 'l.bridge.walletconnect.org' (OS Error: No address associated with hostname, errno = 7)
       _channel = WebSocketChannel.connect(Uri.parse(url));
+      // need connect-app is open
+      // await _channel!.ready;
     } catch (e) {
-      _logger.log(e);
+      _logger.warning('connect error:$e');
+      _onClose();
+      return false;
     }
-    _onOpen(reconnectAttempt);
 
-    // Listen for messages
-    _subscription = _channel?.stream.listen(
-      _onMessage,
-      onError: (error) {
-        _logger.log('open _subscription onError:$error');
-        _onClose();
-      },
-      onDone: _onClose,
-    );
+    _onOpen(reconnectAttempt);
+    _listen();
+
+    return true;
   }
 
   /// Send data on the WebSocket.
@@ -115,25 +113,50 @@ class ReconnectingWebSocket {
       _logger.log('send success');
       return true;
     } catch (ex) {
-      _logger.log('send error: $ex');
+      _logger.warning('send error: $ex');
       return false;
     }
   }
 
   /// Closes the web socket connection.
   Future close({bool forceClose = false}) async {
-    _logger.log('close force:$forceClose');
-    _shouldReconnect = !forceClose;
-    return _channel?.sink.close();
+    try {
+      _logger.log('close force:$forceClose');
+      if (_channel == null) {
+        _logger.log('WebSocketChannel StreamSink is closed');
+        return true;
+      }
+      _shouldForceClose = forceClose;
+      final result = await _channel?.sink.close();
+      if (forceClose) {
+        dispose();
+      }
+      return result;
+    } catch (e) {
+      _logger.warning('close error:$e');
+    }
   }
 
   /// Check if the socket is currently connected.
   bool get connected => _connected;
 
+  void _listen() {
+    _subscription?.cancel();
+    // Listen for messages
+    _subscription = _channel?.stream.listen(
+      _onMessage,
+      onError: (error) {
+        _logger.warning('stream onError:$error');
+        _onClose();
+      },
+      onDone: _onClose,
+    );
+  }
+
   void _onOpen(bool reconnectAttempt) {
+    _logger.log('onOpen');
     _connected = true;
-    _logger.log('_onOpen connected');
-    _shouldReconnect = true;
+    _shouldForceClose = false;
     _reconnecting = false;
     onOpen?.call(reconnectAttempt);
   }
@@ -142,14 +165,14 @@ class ReconnectingWebSocket {
     onClose?.call();
 
     if (_reconnecting) {
-      _logger.log('_onClose _reconnecting');
+      _logger.log('onClose reconnecting:$_reconnecting');
       return;
     }
 
     _connected = false;
 
-    if (!_shouldReconnect) {
-      _logger.log('_onClose _shouldReconnect= false');
+    if (_shouldForceClose) {
+      _logger.log('onClose shouldForceClose');
       return;
     }
 
@@ -159,12 +182,13 @@ class ReconnectingWebSocket {
     final duration =
         timeout > maxReconnectInterval ? maxReconnectInterval : timeout;
 
-    _logger.log('_onClose Reconnecting in: ${duration.inMilliseconds}');
+    _logger.log('onClose Reconnecting in:${duration.inMilliseconds}');
     _reconnectSubscription?.cancel();
     _reconnectSubscription =
         Future.delayed(duration).asStream().listen((event) {
       _subscription?.cancel();
       _reconnectAttempts++;
+      _reconnecting = false;
       open(true);
     });
   }
@@ -176,5 +200,10 @@ class ReconnectingWebSocket {
 
   void dispose() {
     _subscription?.cancel();
+    _reconnectSubscription?.cancel();
+    _channel = null;
+    _subscription = null;
+    _reconnectSubscription = null;
+    _connected = false;
   }
 }

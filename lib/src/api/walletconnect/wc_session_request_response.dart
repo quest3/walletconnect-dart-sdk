@@ -7,7 +7,7 @@ import 'converters.dart';
 part 'wc_session_request_response.g.dart';
 
 /// A response containing session information.
-@JsonSerializable()
+@JsonSerializable(explicitToJson: true)
 @NullableIntConverter()
 class WCSessionRequestResponse {
   @JsonKey(name: 'approved', defaultValue: false)

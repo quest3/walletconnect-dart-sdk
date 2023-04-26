@@ -10,12 +10,16 @@ WCSessionUpdateResponse _$WCSessionUpdateResponseFromJson(
         Map<String, dynamic> json) =>
     WCSessionUpdateResponse(
       approved: json['approved'] as bool? ?? false,
-      chainId: const IntConverter().fromJson(json['chainId']),
+      chainId: json['chainId'] == null
+          ? 0
+          : const IntConverter().fromJson(json['chainId']),
       accounts: (json['accounts'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
           [],
-      networkId: const IntConverter().fromJson(json['networkId']),
+      networkId: json['networkId'] == null
+          ? 0
+          : const IntConverter().fromJson(json['networkId']),
       rpcUrl: json['rpcUrl'] as String? ?? '',
     );
 
@@ -23,8 +27,8 @@ Map<String, dynamic> _$WCSessionUpdateResponseToJson(
         WCSessionUpdateResponse instance) =>
     <String, dynamic>{
       'approved': instance.approved,
-      'chainId': instance.chainId,
+      'chainId': const IntConverter().toJson(instance.chainId),
       'accounts': instance.accounts,
-      'networkId': instance.networkId,
+      'networkId': const IntConverter().toJson(instance.networkId),
       'rpcUrl': instance.rpcUrl,
     };

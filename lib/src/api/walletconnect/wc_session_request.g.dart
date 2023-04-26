@@ -19,5 +19,5 @@ Map<String, dynamic> _$WCSessionRequestToJson(WCSessionRequest instance) =>
     <String, dynamic>{
       'chainId': instance.chainId,
       'peerId': instance.peerId,
-      'peerMeta': instance.peerMeta,
+      'peerMeta': instance.peerMeta?.toJson(),
     };

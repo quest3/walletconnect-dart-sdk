@@ -10,12 +10,15 @@ import 'package:walletconnect_dart/src/utils/logger.dart';
 /// The transport layer used to perform JSON-RPC 2 requests.
 /// A client calls methods on a server and handles the server's responses to
 /// those method calls. Methods can be called with [sendRequest].
+///
+
+final _logger = Logger((SocketTransport).toString());
+
 class SocketTransport {
   final String protocol;
   final int version;
   final String url;
   final List<String> subscriptions;
-  final Logger _logger = Logger((SocketTransport).toString());
   ReconnectingWebSocket? _socket;
 
   final EventBus _eventBus;
@@ -29,26 +32,34 @@ class SocketTransport {
   }) : _eventBus = EventBus();
 
   /// Open a new connection to a web socket server.
-  void open({OnSocketOpen? onOpen, OnSocketClose? onClose}) {
+  void open({OnSocketOpen? onOpen, OnSocketClose? onClose}) async {
     // Connect the channel
     final wsUrl = getWebSocketUrl(
       url: url,
       protocol: protocol,
       version: version.toString(),
     );
-    _logger.log("open url=$wsUrl");
+    _logger.log('open url=$wsUrl');
+    if (_socket != null) {
+      _socket?.dispose();
+    }
     _socket = ReconnectingWebSocket(
       url: wsUrl,
       maxReconnectAttempts: 5,
-      onOpen: onOpen,
+      onOpen: (bool reconnectAttempt) {
+        // wait socket open
+        _queueSubscriptions();
+        onOpen?.call(reconnectAttempt);
+      },
       onClose: onClose,
       onMessage: _socketReceive,
     );
 
-    _socket?.open(false);
+    await _socket!.open(false);
 
     // Queue subscriptions
-    _queueSubscriptions();
+    /// wait open
+    // _queueSubscriptions();
   }
 
   /// Closes the web socket connection.
@@ -105,9 +116,7 @@ class SocketTransport {
     _eventBus
         .on<Event<T>>()
         .where((event) => event.name == eventName)
-        .listen((event) {
-      callback(event.data);
-    });
+        .listen((event) => callback(event.data));
   }
 
   /// Check if we are currently connected with the socket.
@@ -122,7 +131,7 @@ class SocketTransport {
       ack(topic: message.topic);
       _eventBus.fire(Event<WebSocketMessage>('message', message));
     } catch (ex) {
-      return;
+      _logger.warning('socket receive error:$ex');
     }
   }
 
