@@ -11,10 +11,9 @@ WCSessionRequestResponse _$WCSessionRequestResponseFromJson(
     WCSessionRequestResponse(
       approved: json['approved'] as bool? ?? false,
       chainId: const NullableIntConverter().fromJson(json['chainId']),
-      accounts: (json['accounts'] as List<dynamic>?)
-              ?.map((e) => e as String)
-              .toList() ??
-          [],
+      accounts: json['accounts'] == null
+          ? []
+          : const StringListConverter().fromJson(json['accounts']),
       peerId: json['peerId'] as String?,
       peerMeta: json['peerMeta'] == null
           ? null
@@ -26,7 +25,7 @@ Map<String, dynamic> _$WCSessionRequestResponseToJson(
     <String, dynamic>{
       'approved': instance.approved,
       'chainId': const NullableIntConverter().toJson(instance.chainId),
-      'accounts': instance.accounts,
+      'accounts': const StringListConverter().toJson(instance.accounts),
       'peerId': instance.peerId,
       'peerMeta': instance.peerMeta?.toJson(),
     };

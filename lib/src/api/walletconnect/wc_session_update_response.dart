@@ -6,6 +6,7 @@ part 'wc_session_update_response.g.dart';
 
 @JsonSerializable()
 @IntConverter()
+@StringListConverter()
 class WCSessionUpdateResponse {
   @JsonKey(name: 'approved', defaultValue: false)
   final bool approved;

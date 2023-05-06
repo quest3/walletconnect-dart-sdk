@@ -25,3 +25,19 @@ class IntConverter implements JsonConverter<int, dynamic> {
   @override
   int toJson(int? object) => object ?? 0;
 }
+
+class StringListConverter implements JsonConverter<List<String>, dynamic> {
+  const StringListConverter();
+
+  @override
+  List<String> fromJson(dynamic json) {
+    if (json == null) return [];
+    if (json is List) {
+      return json.where((element) => element != null).map((e) => '$e').toList();
+    }
+    return [];
+  }
+
+  @override
+  List<String> toJson(List<String> object) => object;
+}
